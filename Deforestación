@@ -1,0 +1,131 @@
+//SECCIÓN DE INFORMACIÓN SUBIDA A LA NUBE
+//Límite de Honduras con buffer Fution table
+var Honduras = ee.FeatureCollection ("ft:1xzy0h0cZw-eRqXPVrx5x0mg0WeV3NeFIsfyqxd9p");
+//Límite de Honduras con buffer formato ráster
+var limites = ee.Image("users/omarorellanahn/Limit_HN_buff_500_geo");
+//Bosque no bosque 2012
+var B_n_B2012 = ee.Image("users/omarorellanahn/bosque_no_bosque_hn_geo");
+
+/* códigos
+1 = Bosque
+2 = No bosque*/
+//máscaras de cobertura Bosque y NO bosque del año 2012
+var Bosque2012 = B_n_B2012.eq(1);
+var NoBosque2012 = B_n_B2012.eq(2);
+//cuadrícula para hacer las descargas Fution table
+var cuadrilla = ee.FeatureCollection("ft:1iRRvvtTY4sLA0xPkVxc8sZfl_CxsSxLou_WBjmok");
+//Estratos (estos estratos es el potencial de bosque enla capa de bosque)
+var potencial_bosque = ee.Image("users/omarorellanahn/potencial_bosque_geo");
+var mapestratos = potencial_bosque.mask(potencial_bosque);
+/*códigos_potencial
+1= Bosque Latifoliado
+2= Bosque de pino
+3= Bosque de mangle
+4= Bosque seco*/
+//mascaras de la cobertura potencial
+var blatifoliado = potencial_bosque.eq(1);
+var bpino = potencial_bosque.eq(2);
+var bmangle = potencial_bosque.eq(3);
+var bseco = potencial_bosque.eq(4);
+
+
+//Colecciones Landsat
+var landsat5 = ee.ImageCollection('LT5_L1T');
+var landsat7 = ee.ImageCollection('LE7_L1T');
+var landsat8 = ee.ImageCollection('LC8_L1T');
+
+//Filtros fechas _lugar _ nubes
+var f2012_l7 = landsat7.filterDate('2011-06-01', '2013-06-30')
+                    .filterBounds(Honduras)
+                    .filterMetadata('CLOUD_COVER', 'less_than', 50);
+                    
+var f2016_l8 = landsat8.filterDate('2015-11-01', '2016-08-09')
+                    .filterBounds(Honduras)
+                    .filterMetadata('CLOUD_COVER', 'less_than', 50);
+                    
+//TOA y Enmascaramiento de Nubes
+var m2012_l7 = ee.Algorithms.Landsat.simpleComposite(f2012_l7, 60, 5, 40);
+var m2016_l8 = ee.Algorithms.Landsat.simpleComposite(f2016_l8, 40, 10, 40);  
+
+//selección de bandas de los sensores
+var my_band_names = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7' ];   
+var l7 = function(image) {return image.select(['B1', 'B2', 'B3', 'B4', 'B5', 'B6_VCID_1','B7'], my_band_names);};
+//var l8 = function(image) {return image.select(['B1', 'B2', 'B3', 'B4', 'B5', 'B6_VCID_1','B7'], my_band_names);};
+var l8 = function(image) {return image.select(['B2','B3','B4', 'B5', 'B6', 'B7','B8' ], my_band_names);};
+
+var m2012 = l7(m2012_l7);
+var m2016 = l8(m2016_l8);
+
+
+                    
+//Create image ratio bands
+var rat4512 = m2012.select("B4").divide(m2012.select("B5"));
+var rat4612 = m2012.select("B4").divide(m2012.select("B6"));
+var rat4712 = m2012.select("B4").divide(m2012.select("B7"));
+var rat5612 = m2012.select("B5").divide(m2012.select("B6"));
+var rat5712 = m2012.select("B5").divide(m2012.select("B7"));
+var rat6712 = m2012.select("B6").divide(m2012.select("B7"));
+                    
+var rat4516 = m2016.select("B4").divide(m2016.select("B5"));
+var rat4616 = m2016.select("B4").divide(m2016.select("B6"));
+var rat4716 = m2016.select("B4").divide(m2016.select("B7"));
+var rat5616 = m2016.select("B5").divide(m2016.select("B6"));
+var rat5716 = m2016.select("B5").divide(m2016.select("B7"));
+var rat6716 = m2016.select("B6").divide(m2016.select("B7"));
+
+//Add the ratio bands
+var m2012_rat = m2012.addBands(rat4512).addBands(rat4612).addBands(rat4712).addBands(rat5612).addBands(rat5712).addBands(rat6712).clip(Honduras);
+var m2016_rat = m2016.addBands(rat4516).addBands(rat4616).addBands(rat4716).addBands(rat5616).addBands(rat5716).addBands(rat6716).clip(Honduras);
+
+//Cortes de imágenes landsat con ratio en base a Bosque para clasificar
+var c2012b = m2012_rat.mask(blatifoliado).clip(Honduras);
+var c2016b = m2016_rat.mask(blatifoliado).clip(Honduras);
+
+//Cortes de imágenes landsat con bosque para visualizar 
+var mak_2012_bosque = m2012.mask(blatifoliado).clip(Honduras);
+var mak_2016_bosque = m2016.mask(blatifoliado).clip(Honduras);
+
+//Mosaico Multifechas para bosque 2012 de la biósfera
+var mlatifoliado = c2012b.addBands(c2016b);
+
+//Muestras
+var com1 = Bosque_estable.merge(perdidas);
+var com2 = com1.merge(nb_estable);
+
+//Clasificacion
+var classifier = mlatifoliado.trainClassifier({'training_features':com2,
+                                          'training_property':'clase',
+                                          'classifier_name': 'Cart',
+                                          'crs':'EPSG:4326',
+                                          'crs_transform':[0.0002694945852358564,0,-180,0,-0.0002694945852358564,90],});
+
+var classimg = mlatifoliado.classify(classifier);
+
+/*//división de partes para descarga de perdidas
+var p1 = cuadrilla.filterMetadata("name","equals","a");
+var p2 = cuadrilla.filterMetadata("name","equals","b");
+var p3 = cuadrilla.filterMetadata("name","equals","c");
+var p4 = cuadrilla.filterMetadata("name","equals","d");
+var p5 = cuadrilla.filterMetadata("name","equals","e");
+var p6 = cuadrilla.filterMetadata("name","equals","f");
+var p7 = cuadrilla.filterMetadata("name","equals","g");
+
+//Exportar partes de páerdidas
+Export.image(classimg, 'BL1', {scale: 29.78210784, region: p1});
+Export.image(classimg, 'BL2', {scale: 29.78210784, region: p2});
+Export.image(classimg, 'BL3', {scale: 29.78210784, region: p3});
+Export.image(classimg, 'BL4', {scale: 29.78210784, region: p4});
+Export.image(classimg, 'BL5', {scale: 29.78210784, region: p5});
+Export.image(classimg, 'BL6', {scale: 29.78210784, region: p6});
+Export.image(classimg, 'BL7', {scale: 29.78210784, region: p7});*/
+
+Export.image(classimg,'Clasificacion', {scale: 30});
+
+//visualización de capas
+//máscaras potencial de latifoliado
+//Map.addLayer(Biosfera, {'palette': 'FF0000'},'limite');
+Map.addLayer(mak_2012_bosque,{'bands': ['B4', 'B5', 'B3'], 'min': 0, 'max': 110},'mak_2012_bosque', false);
+Map.addLayer(mak_2016_bosque,{'bands': ['B4', 'B5', 'B3'], 'min': 0, 'max': 110},'mak_2016_bosque', false);
+//Clasificación
+Map.addLayer(classimg, {palette:'256e24,e30542,d6ca3e', 'min':1, 'max':3},'Clasificación');
+
